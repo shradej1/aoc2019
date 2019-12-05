@@ -26,4 +26,16 @@ fn main() {
             100 * part2_ans.0 + part2_ans.1
         );
     }
+
+    {
+        use day3::*;
+        let (p1, p2) = get_paths();
+        let intersections = intersect(&p1, &p2);
+        let min_manhattan = compute_min_manhattan_distance(&intersections).unwrap();
+        let min_steps = compute_min_total_steps(&intersections, &p1, &p2).unwrap();
+        println!(
+            "Day 3: Minimum manhattan distance: {}, minimum steps: {}",
+            min_manhattan, min_steps
+        );
+    }
 }
