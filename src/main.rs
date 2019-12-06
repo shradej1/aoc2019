@@ -3,6 +3,7 @@
 mod day1;
 mod day2;
 mod day3;
+mod day4;
 
 use day2::IntCodeProgram;
 
@@ -36,6 +37,15 @@ fn main() {
         println!(
             "Day 3: Minimum manhattan distance: {}, minimum steps: {}",
             min_manhattan, min_steps
+        );
+    }
+
+    {
+        use day4::*;
+        let (p1, p2) = password_search_size();
+        println!(
+            "Password search size with adjacency group >= 2: {}, == 2: {}",
+            p1, p2
         );
     }
 }
