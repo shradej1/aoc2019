@@ -1,8 +1,29 @@
 /// Implements an Intcode computer
 use std::convert::TryFrom;
+use std::convert::TryInto;
 
 pub type Result<T> = std::result::Result<T, String>;
-pub type MemContent = usize;
+pub type MemContent = i32;
+pub type Addr = usize;
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+enum ParameterMode {
+    /// Parameters are interpreted as a position.  If the parameter is 50, its value is the value
+    /// stored at address 50 in memory.
+    PositionMode,
+
+    /// Parameters are interpreted as values.  If the parameter is 50, the value is simply 50.
+    ImmediateMode,
+}
+
+impl ParameterMode {
+    fn parse(&self, prog: &Vec<MemContent>, loc: Addr) -> MemContent {
+        match self {
+            ParameterMode::PositionMode => prog[usize::try_from(prog[loc]).unwrap()],
+            ParameterMode::ImmediateMode => prog[loc],
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum OpCode {
@@ -11,6 +32,31 @@ enum OpCode {
     Input,
     Output,
     Halt,
+}
+
+impl TryFrom<MemContent> for OpCode {
+    type Error = String;
+    fn try_from(u: MemContent) -> Result<OpCode> {
+        match u {
+            1 => Ok(OpCode::Add),
+            2 => Ok(OpCode::Multiply),
+            3 => Ok(OpCode::Input),
+            4 => Ok(OpCode::Output),
+            99 => Ok(OpCode::Halt),
+            _ => Err(format!("Unexpected opcode: {}", u)),
+        }
+    }
+}
+
+impl TryFrom<MemContent> for ParameterMode {
+    type Error = String;
+    fn try_from(u: MemContent) -> Result<ParameterMode> {
+        match u {
+            0 => Ok(ParameterMode::PositionMode),
+            1 => Ok(ParameterMode::ImmediateMode),
+            _ => Err(format!("Unexepcted parameter mode: {}", u)),
+        }
+    }
 }
 
 pub struct Input {
@@ -47,8 +93,8 @@ impl Output {
 
 pub struct IntCodeProgramExecutor<T> {
     program: T,
-    noun: usize,
-    verb: usize,
+    noun: MemContent,
+    verb: MemContent,
     input: Option<Input>,
     output: Option<Output>,
 }
@@ -94,29 +140,41 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
 
     pub fn execute(&mut self) -> Result<MemContent> {
         let prog = &mut self.program;
-        dbg!(&prog);
         let mut instr_ptr = 0;
         loop {
-            let opcode = OpCode::try_from(prog[instr_ptr])?;
-            dbg!(opcode);
+            /// The opcode is a two-digit number based only on the ones and tens digit of the value
+            let opcode = OpCode::try_from(prog[instr_ptr] % 100)?;
             match opcode {
                 OpCode::Add => {
-                    let a1 = prog[prog[instr_ptr + 1]];
-                    let a2 = prog[prog[instr_ptr + 2]];
-                    let dest: usize = prog[instr_ptr + 3];
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 100 % 10)?;
+                    let a1 = param_mode.parse(prog, instr_ptr + 1);
+
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 1000 % 10)?;
+                    let a2 = param_mode.parse(prog, instr_ptr + 2);
+
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 10000 % 10)?;
+                    assert!(param_mode != ParameterMode::ImmediateMode);
+
+                    let dest: Addr = prog[instr_ptr + 3].try_into().unwrap();
                     prog[dest] = a1 + a2;
                     instr_ptr += 4;
                 }
                 OpCode::Multiply => {
-                    let a1 = prog[prog[instr_ptr + 1]];
-                    let a2 = prog[prog[instr_ptr + 2]];
-                    let dest: usize = prog[instr_ptr + 3];
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 100 % 10)?;
+                    let a1 = param_mode.parse(prog, instr_ptr + 1);
+
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 1000 % 10)?;
+                    let a2 = param_mode.parse(prog, instr_ptr + 2);
+
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 10000 % 10)?;
+                    assert!(param_mode != ParameterMode::ImmediateMode);
+
+                    let dest: Addr = prog[instr_ptr + 3].try_into().unwrap();
                     prog[dest] = a1 * a2;
                     instr_ptr += 4;
                 }
                 OpCode::Input => {
-                    let store_addr = prog[instr_ptr + 1];
-                    dbg!(store_addr);
+                    let store_addr: Addr = prog[instr_ptr + 1].try_into().unwrap();
                     let input = self
                         .input
                         .as_mut()
@@ -126,12 +184,12 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     instr_ptr += 2;
                 }
                 OpCode::Output => {
-                    let get_addr = prog[instr_ptr + 1];
-                    dbg!(get_addr);
+                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 100 % 10)?;
+                    let output_value = param_mode.parse(prog, instr_ptr + 1);
                     self.output
                         .as_mut()
                         .expect("Output opcode invalid with no output")
-                        .write(prog[get_addr]);
+                        .write(output_value);
                     instr_ptr += 2;
                 }
                 OpCode::Halt => break,
@@ -143,23 +201,23 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
 
 pub trait IntCodeProgram {
     fn execute(&mut self) -> Result<MemContent>;
-    fn execute_with_args(&mut self, arg1: usize, arg2: usize) -> Result<MemContent>;
+    fn execute_with_args(&mut self, arg1: MemContent, arg2: MemContent) -> Result<MemContent>;
     fn output(&self) -> MemContent;
-    fn search_for_output(&self, target_output: MemContent) -> Result<(usize, usize)>;
+    fn search_for_output(&self, target_output: MemContent) -> Result<(MemContent, MemContent)>;
 }
 
 impl IntCodeProgram for Vec<MemContent> {
-    fn execute(&mut self) -> Result<usize> {
+    fn execute(&mut self) -> Result<MemContent> {
         IntCodeProgramExecutor::from(self).execute()
     }
 
-    fn execute_with_args(&mut self, noun: usize, verb: usize) -> Result<usize> {
+    fn execute_with_args(&mut self, noun: MemContent, verb: MemContent) -> Result<MemContent> {
         self[1] = noun;
         self[2] = verb;
         self.execute()
     }
 
-    fn output(&self) -> usize {
+    fn output(&self) -> MemContent {
         self[0]
     }
 
@@ -167,7 +225,7 @@ impl IntCodeProgram for Vec<MemContent> {
     ///
     /// Note that this is immutable since the original program state must be restored upon each
     /// execution.
-    fn search_for_output(&self, target_output: usize) -> Result<(usize, usize)> {
+    fn search_for_output(&self, target_output: MemContent) -> Result<(MemContent, MemContent)> {
         for noun in 0..=99 {
             for verb in 0..=99 {
                 let mut prog = self.clone();
@@ -183,20 +241,6 @@ impl IntCodeProgram for Vec<MemContent> {
             "no input arguments found for output {}",
             target_output
         ))
-    }
-}
-
-impl TryFrom<usize> for OpCode {
-    type Error = String;
-    fn try_from(u: usize) -> Result<OpCode> {
-        match u {
-            1 => Ok(OpCode::Add),
-            2 => Ok(OpCode::Multiply),
-            3 => Ok(OpCode::Input),
-            4 => Ok(OpCode::Output),
-            99 => Ok(OpCode::Halt),
-            _ => Err(format!("Unexpected opcode: {}", u)),
-        }
     }
 }
 
@@ -265,9 +309,23 @@ mod tests {
         exec.execute().unwrap();
         assert_eq!(exec.output.unwrap().value, 27);
     }
+
+    #[test]
+    fn test_parameter_modes() {
+        let mut prog = vec![1002, 4, 3, 4, 33];
+        prog.execute().unwrap();
+        assert_eq!(prog, vec![1002, 4, 3, 4, 99]);
+    }
+
+    #[test]
+    fn test_negative_numbers() {
+        let mut prog = vec![1101, 100, -1, 4, 0];
+        prog.execute().unwrap();
+        assert_eq!(prog, vec![1101, 100, -1, 4, 99]);
+    }
 }
 
-pub fn get_gravity_assist_program() -> Vec<usize> {
+pub fn get_gravity_assist_program() -> Vec<MemContent> {
     vec![
         1, 0, 0, 3, 1, 1, 2, 3, 1, 3, 4, 3, 1, 5, 0, 3, 2, 1, 10, 19, 1, 19, 5, 23, 1, 6, 23, 27,
         1, 27, 5, 31, 2, 31, 10, 35, 2, 35, 6, 39, 1, 39, 5, 43, 2, 43, 9, 47, 1, 47, 6, 51, 1, 13,
