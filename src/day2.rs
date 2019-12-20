@@ -2,44 +2,155 @@
 use std::convert::TryFrom;
 
 pub type Result<T> = std::result::Result<T, String>;
+pub type MemContent = usize;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum OpCode {
     Add,
     Multiply,
+    Input,
+    Output,
     Halt,
 }
 
-pub trait IntCodeProgram {
-    fn execute(&mut self) -> Result<usize>;
-    fn execute_with_args(&mut self, arg1: usize, arg2: usize) -> Result<usize>;
-    fn output(&self) -> usize;
-    fn search_for_output(&self, target_output: usize) -> Result<(usize, usize)>;
+pub struct Input {
+    value: MemContent,
 }
 
-impl IntCodeProgram for Vec<usize> {
-    fn execute(&mut self) -> Result<usize> {
+impl Input {
+    fn new(value: MemContent) -> Self {
+        Input { value }
+    }
+}
+
+impl Input {
+    fn read(&mut self) -> MemContent {
+        self.value
+    }
+}
+
+pub struct Output {
+    value: MemContent,
+}
+
+impl Output {
+    fn new() -> Self {
+        Output { value: 0 }
+    }
+}
+
+impl Output {
+    fn write(&mut self, value: MemContent) {
+        self.value = value;
+    }
+}
+
+pub struct IntCodeProgramExecutor<T> {
+    program: T,
+    noun: usize,
+    verb: usize,
+    input: Option<Input>,
+    output: Option<Output>,
+}
+
+impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
+    fn from(program: Vec<MemContent>) -> Self {
+        let noun = program[1];
+        let verb = program[2];
+        IntCodeProgramExecutor {
+            program,
+            noun,
+            verb,
+            input: None,
+            output: None,
+        }
+    }
+}
+
+impl<'a> From<&'a mut Vec<MemContent>> for IntCodeProgramExecutor<&'a mut Vec<MemContent>> {
+    fn from(program: &'a mut Vec<MemContent>) -> Self {
+        let noun = program[1];
+        let verb = program[2];
+        IntCodeProgramExecutor {
+            program,
+            noun,
+            verb,
+            input: None,
+            output: None,
+        }
+    }
+}
+
+impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
+    pub fn input(mut self, input: Input) -> Self {
+        self.input = Some(input);
+        self
+    }
+
+    pub fn output(mut self, output: Output) -> Self {
+        self.output = Some(output);
+        self
+    }
+
+    pub fn execute(&mut self) -> Result<MemContent> {
+        let prog = &mut self.program;
+        dbg!(&prog);
         let mut instr_ptr = 0;
         loop {
-            let opcode = OpCode::try_from(self[instr_ptr])?;
+            let opcode = OpCode::try_from(prog[instr_ptr])?;
+            dbg!(opcode);
             match opcode {
                 OpCode::Add => {
-                    let a1 = self[self[instr_ptr + 1]];
-                    let a2 = self[self[instr_ptr + 2]];
-                    let dest: usize = self[instr_ptr + 3];
-                    self[dest] = a1 + a2;
+                    let a1 = prog[prog[instr_ptr + 1]];
+                    let a2 = prog[prog[instr_ptr + 2]];
+                    let dest: usize = prog[instr_ptr + 3];
+                    prog[dest] = a1 + a2;
+                    instr_ptr += 4;
                 }
                 OpCode::Multiply => {
-                    let a1 = self[self[instr_ptr + 1]];
-                    let a2 = self[self[instr_ptr + 2]];
-                    let dest: usize = self[instr_ptr + 3];
-                    self[dest] = a1 * a2;
+                    let a1 = prog[prog[instr_ptr + 1]];
+                    let a2 = prog[prog[instr_ptr + 2]];
+                    let dest: usize = prog[instr_ptr + 3];
+                    prog[dest] = a1 * a2;
+                    instr_ptr += 4;
+                }
+                OpCode::Input => {
+                    let store_addr = prog[instr_ptr + 1];
+                    dbg!(store_addr);
+                    let input = self
+                        .input
+                        .as_mut()
+                        .expect("Input opcode invalid with no input")
+                        .read();
+                    prog[store_addr] = input;
+                    instr_ptr += 2;
+                }
+                OpCode::Output => {
+                    let get_addr = prog[instr_ptr + 1];
+                    dbg!(get_addr);
+                    self.output
+                        .as_mut()
+                        .expect("Output opcode invalid with no output")
+                        .write(prog[get_addr]);
+                    instr_ptr += 2;
                 }
                 OpCode::Halt => break,
             }
-            instr_ptr += 4;
         }
-        Ok(self.output())
+        Ok(self.program[0])
+    }
+}
+
+pub trait IntCodeProgram {
+    fn execute(&mut self) -> Result<MemContent>;
+    fn execute_with_args(&mut self, arg1: usize, arg2: usize) -> Result<MemContent>;
+    fn output(&self) -> MemContent;
+    fn search_for_output(&self, target_output: MemContent) -> Result<(usize, usize)>;
+}
+
+impl IntCodeProgram for Vec<MemContent> {
+    fn execute(&mut self) -> Result<usize> {
+        IntCodeProgramExecutor::from(self).execute()
     }
 
     fn execute_with_args(&mut self, noun: usize, verb: usize) -> Result<usize> {
@@ -81,6 +192,8 @@ impl TryFrom<usize> for OpCode {
         match u {
             1 => Ok(OpCode::Add),
             2 => Ok(OpCode::Multiply),
+            3 => Ok(OpCode::Input),
+            4 => Ok(OpCode::Output),
             99 => Ok(OpCode::Halt),
             _ => Err(format!("Unexpected opcode: {}", u)),
         }
@@ -140,6 +253,17 @@ mod tests {
         assert_eq!(78, result.0);
         assert_eq!(70, result.1);
         assert_eq!(7870, 100 * result.0 + result.1);
+    }
+
+    /// This program outputs whatever it gets as input, then halts.
+    #[test]
+    fn test_io() {
+        let mut prog = vec![3, 0, 4, 0, 99];
+        let mut exec = IntCodeProgramExecutor::from(&mut prog)
+            .input(Input::new(27))
+            .output(Output::new());
+        exec.execute().unwrap();
+        assert_eq!(exec.output.unwrap().value, 27);
     }
 }
 
