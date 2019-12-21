@@ -1,11 +1,12 @@
 #![deny(unused_must_use)]
 
 mod day1;
-mod day2;
+pub mod day2;
 mod day3;
 mod day4;
 //mod day5; -> added to IntCodeProgram from day2
 mod day6;
+mod day7;
 
 use day2::IntCodeProgram;
 

@@ -86,28 +86,35 @@ impl TryFrom<MemContent> for ParameterMode {
     }
 }
 
+/// A stack of input values.  The last one added will be the first one returned.
 pub struct Input {
-    value: MemContent,
+    value: Vec<MemContent>,
 }
 
 impl Input {
-    fn new(value: MemContent) -> Self {
+    pub fn new(value: MemContent) -> Self {
+        Input { value: vec![value] }
+    }
+}
+
+impl From<Vec<MemContent>> for Input {
+    fn from(value: Vec<MemContent>) -> Input {
         Input { value }
     }
 }
 
 impl Input {
     fn read(&mut self) -> MemContent {
-        self.value
+        self.value.pop().expect("Tried to read, but no more input")
     }
 }
 
 pub struct Output {
-    value: Vec<MemContent>,
+    pub value: Vec<MemContent>,
 }
 
 impl Output {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Output { value: Vec::new() }
     }
 }
@@ -123,7 +130,7 @@ pub struct IntCodeProgramExecutor<T> {
     noun: MemContent,
     verb: MemContent,
     input: Option<Input>,
-    output: Option<Output>,
+    pub output: Option<Output>,
 }
 
 impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
