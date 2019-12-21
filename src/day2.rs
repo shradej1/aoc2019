@@ -25,12 +25,35 @@ impl ParameterMode {
     }
 }
 
+fn parse_parameter_value(
+    prog: &Vec<MemContent>,
+    instr_ptr: Addr,
+    parameter_offset: usize,
+) -> MemContent {
+    let param_mode =
+        ParameterMode::try_from(prog[instr_ptr] / 10_i32.pow(parameter_offset as u32 + 1) % 10)
+            .unwrap();
+    param_mode.parse(prog, instr_ptr + parameter_offset)
+}
+
+fn parse_write_index(prog: &Vec<MemContent>, instr_ptr: Addr, parameter_offset: usize) -> Addr {
+    let param_mode =
+        ParameterMode::try_from(prog[instr_ptr] / 10_i32.pow(parameter_offset as u32 + 1) % 10)
+            .unwrap();
+    assert_ne!(param_mode, ParameterMode::ImmediateMode);
+    prog[instr_ptr + parameter_offset].try_into().unwrap()
+}
+
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 enum OpCode {
     Add,
     Multiply,
     Input,
     Output,
+    JumpIfTrue,
+    JumpIfFalse,
+    LessThan,
+    Equals,
     Halt,
 }
 
@@ -42,6 +65,10 @@ impl TryFrom<MemContent> for OpCode {
             2 => Ok(OpCode::Multiply),
             3 => Ok(OpCode::Input),
             4 => Ok(OpCode::Output),
+            5 => Ok(OpCode::JumpIfTrue),
+            6 => Ok(OpCode::JumpIfFalse),
+            7 => Ok(OpCode::LessThan),
+            8 => Ok(OpCode::Equals),
             99 => Ok(OpCode::Halt),
             _ => Err(format!("Unexpected opcode: {}", u)),
         }
@@ -142,39 +169,27 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
         let prog = &mut self.program;
         let mut instr_ptr = 0;
         loop {
-            /// The opcode is a two-digit number based only on the ones and tens digit of the value
+            // The opcode is a two-digit number based only on the ones and tens digit of the value
             let opcode = OpCode::try_from(prog[instr_ptr] % 100)?;
             match opcode {
                 OpCode::Add => {
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 100 % 10)?;
-                    let a1 = param_mode.parse(prog, instr_ptr + 1);
+                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+                    let dest = parse_write_index(prog, instr_ptr, 3);
 
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 1000 % 10)?;
-                    let a2 = param_mode.parse(prog, instr_ptr + 2);
-
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 10000 % 10)?;
-                    assert!(param_mode != ParameterMode::ImmediateMode);
-
-                    let dest: Addr = prog[instr_ptr + 3].try_into().unwrap();
                     prog[dest] = a1 + a2;
                     instr_ptr += 4;
                 }
                 OpCode::Multiply => {
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 100 % 10)?;
-                    let a1 = param_mode.parse(prog, instr_ptr + 1);
+                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+                    let dest = parse_write_index(prog, instr_ptr, 3);
 
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 1000 % 10)?;
-                    let a2 = param_mode.parse(prog, instr_ptr + 2);
-
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 10000 % 10)?;
-                    assert!(param_mode != ParameterMode::ImmediateMode);
-
-                    let dest: Addr = prog[instr_ptr + 3].try_into().unwrap();
                     prog[dest] = a1 * a2;
                     instr_ptr += 4;
                 }
                 OpCode::Input => {
-                    let store_addr: Addr = prog[instr_ptr + 1].try_into().unwrap();
+                    let store_addr = parse_write_index(prog, instr_ptr, 1);
                     let input = self
                         .input
                         .as_mut()
@@ -184,13 +199,49 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     instr_ptr += 2;
                 }
                 OpCode::Output => {
-                    let param_mode = ParameterMode::try_from(prog[instr_ptr] / 100 % 10)?;
-                    let output_value = param_mode.parse(prog, instr_ptr + 1);
+                    let output_value = parse_parameter_value(prog, instr_ptr, 1);
                     self.output
                         .as_mut()
                         .expect("Output opcode invalid with no output")
                         .write(output_value);
                     instr_ptr += 2;
+                }
+                OpCode::JumpIfTrue => {
+                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+
+                    if a1 != 0 {
+                        instr_ptr = a2.try_into().unwrap();
+                    } else {
+                        instr_ptr += 3;
+                    }
+                }
+                OpCode::JumpIfFalse => {
+                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+
+                    if a1 == 0 {
+                        // instruction pointer modified.  do not advance instruction pointer
+                        instr_ptr = a2.try_into().unwrap();
+                    } else {
+                        instr_ptr += 3;
+                    }
+                }
+                OpCode::LessThan => {
+                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+                    let a3 = parse_write_index(prog, instr_ptr, 3);
+
+                    prog[a3] = if a1 < a2 { 1 } else { 0 };
+                    instr_ptr += 4;
+                }
+                OpCode::Equals => {
+                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+                    let a3 = parse_write_index(prog, instr_ptr, 3);
+
+                    prog[a3] = if a1 == a2 { 1 } else { 0 };
+                    instr_ptr += 4;
                 }
                 OpCode::Halt => break,
             }
@@ -325,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn run_test_diagnostics() {
+    fn run_test_diagnostics_air_conditioner_day5() {
         let mut prog = get_test_diagnostic_program();
         let mut exec = IntCodeProgramExecutor::from(&mut prog)
             .input(Input::new(1))
@@ -336,6 +387,107 @@ mod tests {
             exec.output.unwrap().value,
             vec![0, 0, 0, 0, 0, 0, 0, 0, 0, diagnostic_code]
         );
+    }
+
+    #[test]
+    fn test_parse_parameter_value() {
+        let prog = vec![1002, 4, 3, 4, 33];
+        let instr_ptr = 0;
+        let p1 = parse_parameter_value(&prog, instr_ptr, 1);
+        let p2 = parse_parameter_value(&prog, instr_ptr, 2);
+        let p3 = parse_write_index(&prog, instr_ptr, 3);
+        assert_eq!(p1, 33);
+        assert_eq!(p2, 3);
+        assert_eq!(p3, 4);
+    }
+
+    /// Executes a program that takes a single input value, and produces a single output value
+    fn execute_with_input(prog: &Vec<MemContent>, input: MemContent) -> MemContent {
+        let mut prog = prog.clone();
+        let mut exec = IntCodeProgramExecutor::from(&mut prog)
+            .input(Input::new(input))
+            .output(Output::new());
+        exec.execute().unwrap();
+        exec.output.unwrap().value[0]
+    }
+
+    #[test]
+    fn test_position_mode_input_equal_to_8() {
+        let prog = vec![3, 9, 8, 9, 10, 9, 4, 9, 99, -1, 8];
+
+        assert_eq!(0, execute_with_input(&prog, 1));
+        assert_eq!(0, execute_with_input(&prog, 2));
+        assert_eq!(1, execute_with_input(&prog, 8));
+        assert_eq!(0, execute_with_input(&prog, 9));
+    }
+
+    #[test]
+    fn test_position_mode_input_less_than_8() {
+        let prog = vec![3, 9, 7, 9, 10, 9, 4, 9, 99, -1, 8];
+
+        assert_eq!(1, execute_with_input(&prog, 1));
+        assert_eq!(1, execute_with_input(&prog, 2));
+        assert_eq!(0, execute_with_input(&prog, 8));
+        assert_eq!(0, execute_with_input(&prog, 9));
+    }
+
+    #[test]
+    fn test_immediate_mode_input_equal_to_8() {
+        let prog = vec![3, 3, 1108, -1, 8, 3, 4, 3, 99];
+
+        assert_eq!(0, execute_with_input(&prog, 1));
+        assert_eq!(0, execute_with_input(&prog, 2));
+        assert_eq!(1, execute_with_input(&prog, 8));
+        assert_eq!(0, execute_with_input(&prog, 9));
+    }
+
+    #[test]
+    fn test_immediate_mode_input_less_than_8() {
+        let prog = vec![3, 3, 1107, -1, 8, 3, 4, 3, 99];
+
+        assert_eq!(1, execute_with_input(&prog, 1));
+        assert_eq!(1, execute_with_input(&prog, 2));
+        assert_eq!(0, execute_with_input(&prog, 8));
+        assert_eq!(0, execute_with_input(&prog, 9));
+    }
+
+    #[test]
+    fn test_position_mode_jump_test() {
+        let prog = vec![3, 12, 6, 12, 15, 1, 13, 14, 13, 4, 13, 99, -1, 0, 1, 9];
+
+        assert_eq!(0, execute_with_input(&prog, 0));
+        assert_eq!(1, execute_with_input(&prog, 2));
+        assert_eq!(1, execute_with_input(&prog, -1));
+        assert_eq!(1, execute_with_input(&prog, 1));
+    }
+
+    #[test]
+    fn test_immediate_mode_jump_test() {
+        let prog = vec![3, 3, 1105, -1, 9, 1101, 0, 0, 12, 4, 12, 99, 1];
+
+        assert_eq!(0, execute_with_input(&prog, 0));
+        assert_eq!(1, execute_with_input(&prog, 2));
+        assert_eq!(1, execute_with_input(&prog, -1));
+        assert_eq!(1, execute_with_input(&prog, 1));
+    }
+
+    #[test]
+    fn test_below_equal_greater_than_8() {
+        let prog = vec![
+            3, 21, 1008, 21, 8, 20, 1005, 20, 22, 107, 8, 21, 20, 1006, 20, 31, 1106, 0, 36, 98, 0,
+            0, 1002, 21, 125, 20, 4, 20, 1105, 1, 46, 104, 999, 1105, 1, 46, 1101, 1000, 1, 20, 4,
+            20, 1105, 1, 46, 98, 99,
+        ];
+
+        assert_eq!(999, execute_with_input(&prog, 7));
+        assert_eq!(1000, execute_with_input(&prog, 8));
+        assert_eq!(1001, execute_with_input(&prog, 9));
+    }
+
+    #[test]
+    fn run_test_diagnostic_thermal_radiator_controller_day5() {
+        let prog = get_test_diagnostic_program();
+        assert_eq!(5000972, execute_with_input(&prog, 5));
     }
 }
 
