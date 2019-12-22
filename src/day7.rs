@@ -26,11 +26,11 @@ impl AmplifierControllerSoftware {
     }
 
     fn execute(&mut self) -> MemContent {
-        let mut exec = IntCodeProgramExecutor::from(&mut self.program)
-            .input(Input::from(vec![self.input_signal, self.phase_setting]))
-            .output(Output::new());
+        let mut exec = IntCodeProgramExecutor::from(&mut self.program);
+        exec.mut_input()
+            .append(&mut vec![self.phase_setting, self.input_signal]);
         exec.execute().unwrap();
-        exec.output.unwrap().value[0]
+        exec.output()[0]
     }
 }
 

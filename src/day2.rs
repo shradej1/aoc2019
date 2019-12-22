@@ -86,51 +86,12 @@ impl TryFrom<MemContent> for ParameterMode {
     }
 }
 
-/// A stack of input values.  The last one added will be the first one returned.
-pub struct Input {
-    value: Vec<MemContent>,
-}
-
-impl Input {
-    pub fn new(value: MemContent) -> Self {
-        Input { value: vec![value] }
-    }
-}
-
-impl From<Vec<MemContent>> for Input {
-    fn from(value: Vec<MemContent>) -> Input {
-        Input { value }
-    }
-}
-
-impl Input {
-    fn read(&mut self) -> MemContent {
-        self.value.pop().expect("Tried to read, but no more input")
-    }
-}
-
-pub struct Output {
-    pub value: Vec<MemContent>,
-}
-
-impl Output {
-    pub fn new() -> Self {
-        Output { value: Vec::new() }
-    }
-}
-
-impl Output {
-    fn write(&mut self, value: MemContent) {
-        self.value.push(value)
-    }
-}
-
 pub struct IntCodeProgramExecutor<T> {
     program: T,
     noun: MemContent,
     verb: MemContent,
-    input: Option<Input>,
-    pub output: Option<Output>,
+    input: Vec<MemContent>,
+    pub output: Vec<MemContent>,
 }
 
 impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
@@ -141,8 +102,8 @@ impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
             program,
             noun,
             verb,
-            input: None,
-            output: None,
+            input: Vec::new(),
+            output: Vec::new(),
         }
     }
 }
@@ -155,21 +116,19 @@ impl<'a> From<&'a mut Vec<MemContent>> for IntCodeProgramExecutor<&'a mut Vec<Me
             program,
             noun,
             verb,
-            input: None,
-            output: None,
+            input: Vec::new(),
+            output: Vec::new(),
         }
     }
 }
 
 impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
-    pub fn input(mut self, input: Input) -> Self {
-        self.input = Some(input);
-        self
+    pub fn mut_input(&mut self) -> &mut Vec<MemContent> {
+        &mut self.input
     }
 
-    pub fn output(mut self, output: Output) -> Self {
-        self.output = Some(output);
-        self
+    pub fn output(&self) -> &Vec<MemContent> {
+        &self.output
     }
 
     pub fn execute(&mut self) -> Result<MemContent> {
@@ -197,20 +156,14 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                 }
                 OpCode::Input => {
                     let store_addr = parse_write_index(prog, instr_ptr, 1);
-                    let input = self
-                        .input
-                        .as_mut()
-                        .expect("Input opcode invalid with no input")
-                        .read();
+                    self.input.first().expect("Input vector empty");
+                    let input = self.input.remove(0);
                     prog[store_addr] = input;
                     instr_ptr += 2;
                 }
                 OpCode::Output => {
                     let output_value = parse_parameter_value(prog, instr_ptr, 1);
-                    self.output
-                        .as_mut()
-                        .expect("Output opcode invalid with no output")
-                        .write(output_value);
+                    self.output.push(output_value);
                     instr_ptr += 2;
                 }
                 OpCode::JumpIfTrue => {
@@ -361,11 +314,10 @@ mod tests {
     #[test]
     fn test_io() {
         let mut prog = vec![3, 0, 4, 0, 99];
-        let mut exec = IntCodeProgramExecutor::from(&mut prog)
-            .input(Input::new(27))
-            .output(Output::new());
+        let mut exec = IntCodeProgramExecutor::from(&mut prog);
+        exec.mut_input().push(27);
         exec.execute().unwrap();
-        assert_eq!(exec.output.unwrap().value[0], 27);
+        assert_eq!(exec.output()[0], 27);
     }
 
     #[test]
@@ -385,14 +337,13 @@ mod tests {
     #[test]
     fn run_test_diagnostics_air_conditioner_day5() {
         let mut prog = get_test_diagnostic_program();
-        let mut exec = IntCodeProgramExecutor::from(&mut prog)
-            .input(Input::new(1))
-            .output(Output::new());
+        let mut exec = IntCodeProgramExecutor::from(&mut prog);
+        exec.input.push(1);
         exec.execute().unwrap();
         let diagnostic_code = 13285749;
         assert_eq!(
-            exec.output.unwrap().value,
-            vec![0, 0, 0, 0, 0, 0, 0, 0, 0, diagnostic_code]
+            exec.output(),
+            &vec![0, 0, 0, 0, 0, 0, 0, 0, 0, diagnostic_code]
         );
     }
 
@@ -411,11 +362,10 @@ mod tests {
     /// Executes a program that takes a single input value, and produces a single output value
     fn execute_with_input(prog: &Vec<MemContent>, input: MemContent) -> MemContent {
         let mut prog = prog.clone();
-        let mut exec = IntCodeProgramExecutor::from(&mut prog)
-            .input(Input::new(input))
-            .output(Output::new());
+        let mut exec = IntCodeProgramExecutor::from(&mut prog);
+        exec.input.push(input);
         exec.execute().unwrap();
-        exec.output.unwrap().value[0]
+        exec.output()[0]
     }
 
     #[test]
