@@ -1,7 +1,38 @@
+use std::convert::TryFrom;
+
 struct Image {
     width: usize,
     height: usize,
     layers: Vec<String>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
+enum Pixel {
+    Black,
+    White,
+    Transparent,
+}
+
+impl TryFrom<char> for Pixel {
+    type Error = String;
+    fn try_from(c: char) -> Result<Pixel, String> {
+        match c {
+            '0' => Ok(Pixel::Black),
+            '1' => Ok(Pixel::White),
+            '2' => Ok(Pixel::Transparent),
+            _ => Err(format!("Couldn't convert {} to pixel", c)),
+        }
+    }
+}
+
+impl Into<char> for Pixel {
+    fn into(self) -> char {
+        match self {
+            Pixel::Black => '0',
+            Pixel::White => '1',
+            Pixel::Transparent => '2',
+        }
+    }
 }
 
 impl Image {
@@ -19,6 +50,34 @@ impl Image {
             height,
             layers,
         }
+    }
+
+    /// Returns the character at the given row and col indices, in the given layer.
+    fn at(&self, layer: usize, row: usize, col: usize) -> char {
+        assert!(layer < self.layers.len() && row < self.height && col < self.width);
+        self.layers[layer]
+            .chars()
+            .nth(row * self.width + col)
+            .unwrap()
+    }
+
+    /// First layer is in front, last layer is in back.
+    fn decode(&self) -> String {
+        let mut message = String::new();
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let p = self
+                    .layers
+                    .iter()
+                    .map(|l| l.chars().nth(row * self.width + col).unwrap())
+                    .map(|c| Pixel::try_from(c).unwrap())
+                    .find(|p| *p != Pixel::Transparent)
+                    .unwrap();
+                message.push(p.into());
+            }
+            message.push('\n');
+        }
+        message
     }
 }
 
@@ -44,6 +103,38 @@ mod tests {
         let num_1s = fewest_zeros.chars().filter(|c| *c == '1').count();
         let num_2s = fewest_zeros.chars().filter(|c| *c == '2').count();
         assert_eq!(2460, num_1s * num_2s);
+    }
+
+    #[test]
+    fn test_decode_message() {
+        let image = Image::new("0222112222120000".to_string(), 2, 2);
+        let decoded = image.decode();
+        assert_eq!("01\n10\n", &decoded);
+    }
+
+    #[test]
+    fn decode_puzzle_day_8_part_2() {
+        let image = Image::new(get_puzzle_input().to_string(), 25, 6);
+        let decoded = image.decode();
+        let expected_image = "\
+                              □■■■■□□□■■□□□□■□■■□■□■■□■\n\
+                              □■■■■□■■□■□■■■■□■□■■□■■□■\n\
+                              □■■■■□■■□■□□□■■□□■■■□■■□■\n\
+                              □■■■■□□□■■□■■■■□■□■■□■■□■\n\
+                              □■■■■□■□■■□■■■■□■□■■□■■□■\n\
+                              □□□□■□■■□■□■■■■□■■□■■□□■■\n\
+                              ";
+
+        let expected: String = expected_image
+            .chars()
+            .map(|c| match c {
+                '■' => '0',
+                '□' => '1',
+                c => c,
+            })
+            .collect();
+
+        assert_eq!(expected, decoded);
     }
 }
 
