@@ -90,6 +90,7 @@ pub struct IntCodeProgramExecutor<T> {
     program: T,
     noun: MemContent,
     verb: MemContent,
+    instr_ptr: Addr,
     input: Vec<MemContent>,
     pub output: Vec<MemContent>,
 }
@@ -102,6 +103,7 @@ impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
             program,
             noun,
             verb,
+            instr_ptr: 0,
             input: Vec::new(),
             output: Vec::new(),
         }
@@ -116,12 +118,20 @@ impl<'a> From<&'a mut Vec<MemContent>> for IntCodeProgramExecutor<&'a mut Vec<Me
             program,
             noun,
             verb,
+            instr_ptr: 0,
             input: Vec::new(),
             output: Vec::new(),
         }
     }
 }
 
+#[derive(Debug)]
+pub enum ProgramState {
+    AwaitingInput,
+    Terminated(MemContent),
+}
+
+// TODO: remove this, let IntCodeProgramExecutor own program, and add accessor
 impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
     pub fn mut_input(&mut self) -> &mut Vec<MemContent> {
         &mut self.input
@@ -131,82 +141,88 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
         &self.output
     }
 
-    pub fn execute(&mut self) -> Result<MemContent> {
+    pub fn resume(&mut self, input: MemContent) -> Result<ProgramState> {
+        self.input.push(input);
+        self.execute()
+    }
+
+    pub fn execute(&mut self) -> Result<ProgramState> {
         let prog = &mut self.program;
-        let mut instr_ptr = 0;
         loop {
             // The opcode is a two-digit number based only on the ones and tens digit of the value
-            let opcode = OpCode::try_from(prog[instr_ptr] % 100)?;
+            let opcode = OpCode::try_from(prog[self.instr_ptr] % 100)?;
             match opcode {
                 OpCode::Add => {
-                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
-                    let dest = parse_write_index(prog, instr_ptr, 3);
+                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
+                    let dest = parse_write_index(prog, self.instr_ptr, 3);
 
                     prog[dest] = a1 + a2;
-                    instr_ptr += 4;
+                    self.instr_ptr += 4;
                 }
                 OpCode::Multiply => {
-                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
-                    let dest = parse_write_index(prog, instr_ptr, 3);
+                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
+                    let dest = parse_write_index(prog, self.instr_ptr, 3);
 
                     prog[dest] = a1 * a2;
-                    instr_ptr += 4;
+                    self.instr_ptr += 4;
                 }
                 OpCode::Input => {
-                    let store_addr = parse_write_index(prog, instr_ptr, 1);
-                    self.input.first().expect("Input vector empty");
+                    let store_addr = parse_write_index(prog, self.instr_ptr, 1);
+                    if self.input.is_empty() {
+                        return Ok(ProgramState::AwaitingInput);
+                    }
                     let input = self.input.remove(0);
                     prog[store_addr] = input;
-                    instr_ptr += 2;
+                    self.instr_ptr += 2;
                 }
                 OpCode::Output => {
-                    let output_value = parse_parameter_value(prog, instr_ptr, 1);
+                    let output_value = parse_parameter_value(prog, self.instr_ptr, 1);
                     self.output.push(output_value);
-                    instr_ptr += 2;
+                    self.instr_ptr += 2;
                 }
                 OpCode::JumpIfTrue => {
-                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
 
                     if a1 != 0 {
-                        instr_ptr = a2.try_into().unwrap();
+                        self.instr_ptr = a2.try_into().unwrap();
                     } else {
-                        instr_ptr += 3;
+                        self.instr_ptr += 3;
                     }
                 }
                 OpCode::JumpIfFalse => {
-                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
+                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
 
                     if a1 == 0 {
                         // instruction pointer modified.  do not advance instruction pointer
-                        instr_ptr = a2.try_into().unwrap();
+                        self.instr_ptr = a2.try_into().unwrap();
                     } else {
-                        instr_ptr += 3;
+                        self.instr_ptr += 3;
                     }
                 }
                 OpCode::LessThan => {
-                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
-                    let a3 = parse_write_index(prog, instr_ptr, 3);
+                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
+                    let a3 = parse_write_index(prog, self.instr_ptr, 3);
 
                     prog[a3] = if a1 < a2 { 1 } else { 0 };
-                    instr_ptr += 4;
+                    self.instr_ptr += 4;
                 }
                 OpCode::Equals => {
-                    let a1 = parse_parameter_value(prog, instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, instr_ptr, 2);
-                    let a3 = parse_write_index(prog, instr_ptr, 3);
+                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
+                    let a3 = parse_write_index(prog, self.instr_ptr, 3);
 
                     prog[a3] = if a1 == a2 { 1 } else { 0 };
-                    instr_ptr += 4;
+                    self.instr_ptr += 4;
                 }
                 OpCode::Halt => break,
             }
         }
-        Ok(self.program[0])
+        Ok(ProgramState::Terminated(self.program[0]))
     }
 }
 
@@ -219,7 +235,12 @@ pub trait IntCodeProgram {
 
 impl IntCodeProgram for Vec<MemContent> {
     fn execute(&mut self) -> Result<MemContent> {
-        IntCodeProgramExecutor::from(self).execute()
+        let state = IntCodeProgramExecutor::from(self).execute();
+        if let Ok(ProgramState::Terminated(result)) = state {
+            Ok(result)
+        } else {
+            panic!("Execution returned with unexpected state: {:?}", state);
+        }
     }
 
     fn execute_with_args(&mut self, noun: MemContent, verb: MemContent) -> Result<MemContent> {

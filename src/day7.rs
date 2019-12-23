@@ -62,6 +62,61 @@ fn permute(set: &BTreeSet<MemContent>) -> Vec<Vec<MemContent>> {
     }
 }
 
+fn compute_thruster_signal_with_feedback(
+    prog: &Vec<MemContent>,
+    phase_settings: &[MemContent],
+) -> MemContent {
+    assert!(phase_settings.len() == 5);
+
+    let mut p = prog.clone();
+    let mut amp_a = IntCodeProgramExecutor::from(&mut p);
+    amp_a.mut_input().push(phase_settings[0]);
+
+    let mut p = prog.clone();
+    let mut amp_b = IntCodeProgramExecutor::from(&mut p);
+    amp_b.mut_input().push(phase_settings[1]);
+
+    let mut p = prog.clone();
+    let mut amp_c = IntCodeProgramExecutor::from(&mut p);
+    amp_c.mut_input().push(phase_settings[2]);
+
+    let mut p = prog.clone();
+    let mut amp_d = IntCodeProgramExecutor::from(&mut p);
+    amp_d.mut_input().push(phase_settings[3]);
+
+    let mut p = prog.clone();
+    let mut amp_e = IntCodeProgramExecutor::from(&mut p);
+    amp_e.mut_input().push(phase_settings[4]);
+
+    amp_a.mut_input().push(0);
+    loop {
+        if let ProgramState::Terminated(_) = amp_a.execute().unwrap() {
+            println!("Amplifier A terminated.");
+        }
+        amp_b.mut_input().push(amp_a.output.remove(0));
+
+        if let ProgramState::Terminated(_) = amp_b.execute().unwrap() {
+            println!("Amplifier B terminated.");
+        }
+        amp_c.mut_input().push(amp_b.output.remove(0));
+
+        if let ProgramState::Terminated(_) = amp_c.execute().unwrap() {
+            println!("Amplifier C terminated.");
+        }
+        amp_d.mut_input().push(amp_c.output.remove(0));
+
+        if let ProgramState::Terminated(_) = amp_d.execute().unwrap() {
+            println!("Amplifier D terminated.");
+        }
+        amp_e.mut_input().push(amp_d.output.remove(0));
+
+        match amp_e.execute().unwrap() {
+            ProgramState::Terminated(result) => return amp_e.output.remove(0),
+            ProgramState::AwaitingInput => amp_a.mut_input().push(amp_e.output.remove(0)),
+        }
+    }
+}
+
 /// Searches for the phase settings (0, 1, 2, 3, 4) that maximize the thrust program output.
 /// Each phase setting is only used once.
 fn search_max_thrust_signal_settings() -> [MemContent; 5] {
@@ -129,6 +184,51 @@ mod tests {
 
         assert_eq!(422858, max_output);
         assert_eq!(&[3, 1, 4, 2, 0], &max_perm[..]);
+    }
+
+    #[test]
+    fn test_compute_thruster_signal_with_feedback() {
+        let prog = vec![
+            3, 26, 1001, 26, -4, 26, 3, 27, 1002, 27, 2, 27, 1, 27, 26, 27, 4, 27, 1001, 28, -1,
+            28, 1005, 28, 6, 99, 0, 0, 5,
+        ];
+        assert_eq!(
+            139629729,
+            compute_thruster_signal_with_feedback(&prog, &[9, 8, 7, 6, 5])
+        );
+    }
+
+    #[test]
+    fn test_compute_thruster_signal_with_feedback_2() {
+        let prog = vec![
+            3, 52, 1001, 52, -5, 52, 3, 53, 1, 52, 56, 54, 1007, 54, 5, 55, 1005, 55, 26, 1001, 54,
+            -5, 54, 1105, 1, 12, 1, 53, 54, 53, 1008, 54, 0, 55, 1001, 55, 1, 55, 2, 53, 55, 53, 4,
+            53, 1001, 56, -1, 56, 1005, 56, 6, 99, 0, 0, 0, 0, 10,
+        ];
+        assert_eq!(
+            18216,
+            compute_thruster_signal_with_feedback(&prog, &[9, 7, 8, 5, 6])
+        );
+    }
+
+    #[test]
+    fn find_optimal_phase_settings_with_feedback() {
+        let prog = get_amplifier_controller_software();
+        let set: BTreeSet<MemContent> = [5_i32, 6, 7, 8, 9].iter().cloned().collect();
+        let permutations = permute(&set);
+        let mut max_perm = &permutations[0];
+        let mut max_output = 0;
+
+        for p in &permutations {
+            let output = compute_thruster_signal_with_feedback(&prog, &p);
+            if output > max_output {
+                max_output = output;
+                max_perm = &p;
+            }
+        }
+
+        assert_eq!(14897241, max_output);
+        assert_eq!(&[7, 8, 9, 6, 5], &max_perm[..]);
     }
 }
 
