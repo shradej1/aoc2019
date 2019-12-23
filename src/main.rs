@@ -7,6 +7,7 @@ mod day4;
 //mod day5; -> added to IntCodeProgram from day2
 mod day6;
 mod day7;
+mod day8;
 
 use day2::IntCodeProgram;
 
