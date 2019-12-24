@@ -171,45 +171,43 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
     }
 
     pub fn execute(&mut self) -> Result<ProgramState> {
-        // TODO: remove this borrow, and replace parse_parameter_value with self.get_param
-        let prog = &mut self.program;
         loop {
             // The opcode is a two-digit number based only on the ones and tens digit of the value
-            let opcode = OpCode::try_from(prog[self.instr_ptr] % 100)?;
+            let opcode = OpCode::try_from(self.program[self.instr_ptr] % 100)?;
             match opcode {
                 OpCode::Add => {
-                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
-                    let dest = parse_write_index(prog, self.instr_ptr, 3);
+                    let a1 = self.get_param(1);
+                    let a2 = self.get_param(2);
+                    let dest = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    prog[dest] = a1 + a2;
+                    self.program[dest] = a1 + a2;
                     self.instr_ptr += 4;
                 }
                 OpCode::Multiply => {
-                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
-                    let dest = parse_write_index(prog, self.instr_ptr, 3);
+                    let a1 = self.get_param(1);
+                    let a2 = self.get_param(2);
+                    let dest = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    prog[dest] = a1 * a2;
+                    self.program[dest] = a1 * a2;
                     self.instr_ptr += 4;
                 }
                 OpCode::Input => {
-                    let store_addr = parse_write_index(prog, self.instr_ptr, 1);
+                    let store_addr = parse_write_index(self.program, self.instr_ptr, 1);
                     if self.input.is_empty() {
                         return Ok(ProgramState::AwaitingInput);
                     }
                     let input = self.input.remove(0);
-                    prog[store_addr] = input;
+                    self.program[store_addr] = input;
                     self.instr_ptr += 2;
                 }
                 OpCode::Output => {
-                    let output_value = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let output_value = self.get_param(1);
                     self.output.push(output_value);
                     self.instr_ptr += 2;
                 }
                 OpCode::JumpIfTrue => {
-                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
+                    let a1 = self.get_param(1);
+                    let a2 = self.get_param(2);
 
                     if a1 != 0 {
                         self.instr_ptr = a2.try_into().unwrap();
@@ -218,8 +216,8 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     }
                 }
                 OpCode::JumpIfFalse => {
-                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
+                    let a1 = self.get_param(1);
+                    let a2 = self.get_param(2);
 
                     if a1 == 0 {
                         // instruction pointer modified.  do not advance instruction pointer
@@ -229,24 +227,24 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     }
                 }
                 OpCode::LessThan => {
-                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
-                    let a3 = parse_write_index(prog, self.instr_ptr, 3);
+                    let a1 = self.get_param(1);
+                    let a2 = self.get_param(2);
+                    let a3 = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    prog[a3] = if a1 < a2 { 1 } else { 0 };
+                    self.program[a3] = if a1 < a2 { 1 } else { 0 };
                     self.instr_ptr += 4;
                 }
                 OpCode::Equals => {
-                    let a1 = parse_parameter_value(prog, self.instr_ptr, 1);
-                    let a2 = parse_parameter_value(prog, self.instr_ptr, 2);
-                    let a3 = parse_write_index(prog, self.instr_ptr, 3);
+                    let a1 = self.get_param(1);
+                    let a2 = self.get_param(2);
+                    let a3 = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    prog[a3] = if a1 == a2 { 1 } else { 0 };
+                    self.program[a3] = if a1 == a2 { 1 } else { 0 };
                     self.instr_ptr += 4;
                 }
                 OpCode::RelativeBaseOffsetAdj => {
                     let orig = self.relative_base;
-                    let adjustment = parse_parameter_value(prog, self.instr_ptr, 1);
+                    let adjustment = self.get_param(1);
                     if adjustment < 0 {
                         self.relative_base = self
                             .relative_base
@@ -265,7 +263,12 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
     }
 
     fn get_param(&self, param_offset: usize) -> MemContent {
-        parse_parameter_value(self.program, self.instr_ptr, param_offset)
+        parse_parameter_value(
+            self.program,
+            self.instr_ptr,
+            param_offset,
+            self.relative_base,
+        )
     }
 }
 
@@ -415,8 +418,8 @@ mod tests {
     fn test_parse_parameter_value() {
         let prog = vec![1002, 4, 3, 4, 33];
         let instr_ptr = 0;
-        let p1 = parse_parameter_value(&prog, instr_ptr, 1);
-        let p2 = parse_parameter_value(&prog, instr_ptr, 2);
+        let p1 = parse_parameter_value(&prog, instr_ptr, 1, 0);
+        let p2 = parse_parameter_value(&prog, instr_ptr, 2, 0);
         let p3 = parse_write_index(&prog, instr_ptr, 3);
         assert_eq!(p1, 33);
         assert_eq!(p2, 3);
