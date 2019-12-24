@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::convert::TryInto;
 
 pub type Result<T> = std::result::Result<T, String>;
-pub type MemContent = i32;
+pub type MemContent = i64;
 pub type Addr = usize;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -61,17 +61,33 @@ fn parse_parameter_value(
     relative_base: usize,
 ) -> MemContent {
     let param_mode =
-        ParameterMode::try_from(prog[instr_ptr] / 10_i32.pow(parameter_offset as u32 + 1) % 10)
+        ParameterMode::try_from(prog[instr_ptr] / 10_i64.pow(parameter_offset as u32 + 1) % 10)
             .unwrap();
     param_mode.parse(prog, instr_ptr + parameter_offset, relative_base)
 }
 
-fn parse_write_index(prog: &Vec<MemContent>, instr_ptr: Addr, parameter_offset: usize) -> Addr {
+fn parse_write_index(
+    prog: &Vec<MemContent>,
+    instr_ptr: Addr,
+    parameter_offset: usize,
+    relative_base: usize,
+) -> Addr {
     let param_mode =
-        ParameterMode::try_from(prog[instr_ptr] / 10_i32.pow(parameter_offset as u32 + 1) % 10)
+        ParameterMode::try_from(prog[instr_ptr] / 10_i64.pow(parameter_offset as u32 + 1) % 10)
             .unwrap();
     assert_ne!(param_mode, ParameterMode::ImmediateMode);
-    prog[instr_ptr + parameter_offset].try_into().unwrap()
+    // TODO: I think we should be able to use this...  but it doesn't work
+    // param_mode
+    //     .parse(prog, instr_ptr + parameter_offset, relative_base)
+    //     .try_into()
+    //     .unwrap()
+    let offset = if param_mode == ParameterMode::RelativeMode {
+        relative_base
+    } else {
+        0
+    };
+
+    usize::try_from(prog[instr_ptr + parameter_offset] + offset as i64).unwrap()
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -197,7 +213,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                 OpCode::Add => {
                     let a1 = self.get_param(1);
                     let a2 = self.get_param(2);
-                    let dest = parse_write_index(self.program, self.instr_ptr, 3);
+                    let dest = self.get_write_index(3);
 
                     self.write(dest, a1 + a2);
                     self.instr_ptr += 4;
@@ -205,13 +221,14 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                 OpCode::Multiply => {
                     let a1 = self.get_param(1);
                     let a2 = self.get_param(2);
-                    let dest = parse_write_index(self.program, self.instr_ptr, 3);
+                    let dest = self.get_write_index(3);
 
                     self.write(dest, a1 * a2);
                     self.instr_ptr += 4;
                 }
                 OpCode::Input => {
-                    let store_addr = parse_write_index(self.program, self.instr_ptr, 1);
+                    println!("{}", self.program[self.instr_ptr]);
+                    let store_addr = self.get_write_index(1);
                     if self.input.is_empty() {
                         return Ok(ProgramState::AwaitingInput);
                     }
@@ -248,7 +265,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                 OpCode::LessThan => {
                     let a1 = self.get_param(1);
                     let a2 = self.get_param(2);
-                    let a3 = parse_write_index(self.program, self.instr_ptr, 3);
+                    let a3 = self.get_write_index(3);
 
                     self.write(a3, if a1 < a2 { 1 } else { 0 });
                     self.instr_ptr += 4;
@@ -256,7 +273,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                 OpCode::Equals => {
                     let a1 = self.get_param(1);
                     let a2 = self.get_param(2);
-                    let a3 = parse_write_index(self.program, self.instr_ptr, 3);
+                    let a3 = self.get_write_index(3);
 
                     self.write(a3, if a1 == a2 { 1 } else { 0 });
                     self.instr_ptr += 4;
@@ -283,6 +300,15 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
 
     fn get_param(&self, param_offset: usize) -> MemContent {
         parse_parameter_value(
+            self.program,
+            self.instr_ptr,
+            param_offset,
+            self.relative_base,
+        )
+    }
+
+    fn get_write_index(&self, param_offset: usize) -> Addr {
+        parse_write_index(
             self.program,
             self.instr_ptr,
             param_offset,
@@ -439,7 +465,7 @@ mod tests {
         let instr_ptr = 0;
         let p1 = parse_parameter_value(&prog, instr_ptr, 1, 0);
         let p2 = parse_parameter_value(&prog, instr_ptr, 2, 0);
-        let p3 = parse_write_index(&prog, instr_ptr, 3);
+        let p3 = parse_write_index(&prog, instr_ptr, 3, 0);
         assert_eq!(p1, 33);
         assert_eq!(p2, 3);
         assert_eq!(p3, 4);

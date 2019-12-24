@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_cycle_phase_settings() {
-        let set: BTreeSet<MemContent> = [0_i32, 1, 2, 3, 4].iter().cloned().collect();
+        let set: BTreeSet<MemContent> = [0, 1, 2, 3, 4].iter().cloned().collect();
         let permutations = permute(&set);
         assert_eq!(5 * 4 * 3 * 2 * 1, permutations.len());
     }
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn find_optimal_phase_settings() {
         let prog = get_amplifier_controller_software();
-        let set: BTreeSet<MemContent> = [0_i32, 1, 2, 3, 4].iter().cloned().collect();
+        let set: BTreeSet<MemContent> = [0, 1, 2, 3, 4].iter().cloned().collect();
         let permutations = permute(&set);
         let mut max_perm = &permutations[0];
         let mut max_output = 0;
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn find_optimal_phase_settings_with_feedback() {
         let prog = get_amplifier_controller_software();
-        let set: BTreeSet<MemContent> = [5_i32, 6, 7, 8, 9].iter().cloned().collect();
+        let set: BTreeSet<MemContent> = [5, 6, 7, 8, 9].iter().cloned().collect();
         let permutations = permute(&set);
         let mut max_perm = &permutations[0];
         let mut max_output = 0;
