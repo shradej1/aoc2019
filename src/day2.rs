@@ -21,21 +21,34 @@ enum ParameterMode {
 }
 
 impl ParameterMode {
+    // TODO: move into executor
     fn parse(&self, prog: &Vec<MemContent>, loc: Addr, relative_base: Addr) -> MemContent {
+        fn read_or_default(prog: &Vec<MemContent>, abs_addr: Addr) -> MemContent {
+            if abs_addr > prog.len() {
+                0
+            } else {
+                prog[abs_addr]
+            }
+        }
+
         match self {
-            ParameterMode::PositionMode => prog[usize::try_from(prog[loc]).unwrap()],
-            ParameterMode::ImmediateMode => prog[loc],
+            ParameterMode::PositionMode => {
+                let read_pos = usize::try_from(read_or_default(prog, loc)).unwrap();
+                read_or_default(prog, read_pos)
+            }
+            ParameterMode::ImmediateMode => read_or_default(prog, loc),
             ParameterMode::RelativeMode => {
                 let abs_loc;
-                if prog[loc] < 0 {
+                let offset = read_or_default(prog, loc);
+                if offset < 0 {
                     abs_loc = relative_base
-                        .checked_sub(usize::try_from(-prog[loc]).unwrap())
+                        .checked_sub(usize::try_from(-offset).unwrap())
                         .unwrap();
                 } else {
-                    abs_loc = relative_base + usize::try_from(prog[loc]).unwrap();
+                    abs_loc = relative_base + usize::try_from(offset).unwrap();
                 }
 
-                prog[abs_loc]
+                read_or_default(prog, abs_loc)
             }
         }
     }
@@ -134,7 +147,6 @@ impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
 
 impl<'a> From<&'a mut Vec<MemContent>> for IntCodeProgramExecutor<&'a mut Vec<MemContent>> {
     fn from(program: &'a mut Vec<MemContent>) -> Self {
-        program.resize(program.len() * 10, MemContent::default());
         let noun = program[1];
         let verb = program[2];
         IntCodeProgramExecutor {
@@ -170,6 +182,13 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
         self.execute()
     }
 
+    pub fn write(&mut self, loc: Addr, content: MemContent) {
+        if loc >= self.program.len() {
+            self.program.resize(loc + 1, MemContent::default());
+        }
+        self.program[loc] = content;
+    }
+
     pub fn execute(&mut self) -> Result<ProgramState> {
         loop {
             // The opcode is a two-digit number based only on the ones and tens digit of the value
@@ -180,7 +199,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     let a2 = self.get_param(2);
                     let dest = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    self.program[dest] = a1 + a2;
+                    self.write(dest, a1 + a2);
                     self.instr_ptr += 4;
                 }
                 OpCode::Multiply => {
@@ -188,7 +207,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     let a2 = self.get_param(2);
                     let dest = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    self.program[dest] = a1 * a2;
+                    self.write(dest, a1 * a2);
                     self.instr_ptr += 4;
                 }
                 OpCode::Input => {
@@ -197,7 +216,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                         return Ok(ProgramState::AwaitingInput);
                     }
                     let input = self.input.remove(0);
-                    self.program[store_addr] = input;
+                    self.write(store_addr, input);
                     self.instr_ptr += 2;
                 }
                 OpCode::Output => {
@@ -231,7 +250,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     let a2 = self.get_param(2);
                     let a3 = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    self.program[a3] = if a1 < a2 { 1 } else { 0 };
+                    self.write(a3, if a1 < a2 { 1 } else { 0 });
                     self.instr_ptr += 4;
                 }
                 OpCode::Equals => {
@@ -239,7 +258,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     let a2 = self.get_param(2);
                     let a3 = parse_write_index(self.program, self.instr_ptr, 3);
 
-                    self.program[a3] = if a1 == a2 { 1 } else { 0 };
+                    self.write(a3, if a1 == a2 { 1 } else { 0 });
                     self.instr_ptr += 4;
                 }
                 OpCode::RelativeBaseOffsetAdj => {
