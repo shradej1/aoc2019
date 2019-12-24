@@ -14,13 +14,29 @@ enum ParameterMode {
 
     /// Parameters are interpreted as values.  If the parameter is 50, the value is simply 50.
     ImmediateMode,
+
+    /// Parameters in relative mode are read like position mode, but with a different starting base
+    /// address
+    RelativeMode,
 }
 
 impl ParameterMode {
-    fn parse(&self, prog: &Vec<MemContent>, loc: Addr) -> MemContent {
+    fn parse(&self, prog: &Vec<MemContent>, loc: Addr, relative_base: Addr) -> MemContent {
         match self {
             ParameterMode::PositionMode => prog[usize::try_from(prog[loc]).unwrap()],
             ParameterMode::ImmediateMode => prog[loc],
+            ParameterMode::RelativeMode => {
+                let abs_loc;
+                if prog[loc] < 0 {
+                    abs_loc = relative_base
+                        .checked_sub(usize::try_from(-prog[loc]).unwrap())
+                        .unwrap();
+                } else {
+                    abs_loc = relative_base + usize::try_from(prog[loc]).unwrap();
+                }
+
+                prog[abs_loc]
+            }
         }
     }
 }
@@ -29,11 +45,12 @@ fn parse_parameter_value(
     prog: &Vec<MemContent>,
     instr_ptr: Addr,
     parameter_offset: usize,
+    relative_base: usize,
 ) -> MemContent {
     let param_mode =
         ParameterMode::try_from(prog[instr_ptr] / 10_i32.pow(parameter_offset as u32 + 1) % 10)
             .unwrap();
-    param_mode.parse(prog, instr_ptr + parameter_offset)
+    param_mode.parse(prog, instr_ptr + parameter_offset, relative_base)
 }
 
 fn parse_write_index(prog: &Vec<MemContent>, instr_ptr: Addr, parameter_offset: usize) -> Addr {
@@ -54,6 +71,7 @@ enum OpCode {
     JumpIfFalse,
     LessThan,
     Equals,
+    RelativeBaseOffsetAdj,
     Halt,
 }
 
@@ -69,6 +87,7 @@ impl TryFrom<MemContent> for OpCode {
             6 => Ok(OpCode::JumpIfFalse),
             7 => Ok(OpCode::LessThan),
             8 => Ok(OpCode::Equals),
+            9 => Ok(OpCode::RelativeBaseOffsetAdj),
             99 => Ok(OpCode::Halt),
             _ => Err(format!("Unexpected opcode: {}", u)),
         }
@@ -81,6 +100,7 @@ impl TryFrom<MemContent> for ParameterMode {
         match u {
             0 => Ok(ParameterMode::PositionMode),
             1 => Ok(ParameterMode::ImmediateMode),
+            2 => Ok(ParameterMode::RelativeMode),
             _ => Err(format!("Unexepcted parameter mode: {}", u)),
         }
     }
@@ -91,6 +111,7 @@ pub struct IntCodeProgramExecutor<T> {
     noun: MemContent,
     verb: MemContent,
     instr_ptr: Addr,
+    relative_base: Addr,
     input: Vec<MemContent>,
     pub output: Vec<MemContent>,
 }
@@ -104,6 +125,7 @@ impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
             noun,
             verb,
             instr_ptr: 0,
+            relative_base: 0,
             input: Vec::new(),
             output: Vec::new(),
         }
@@ -118,6 +140,7 @@ impl<'a> From<&'a mut Vec<MemContent>> for IntCodeProgramExecutor<&'a mut Vec<Me
             program,
             noun,
             verb,
+            relative_base: 0,
             instr_ptr: 0,
             input: Vec::new(),
             output: Vec::new(),
@@ -147,6 +170,7 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
     }
 
     pub fn execute(&mut self) -> Result<ProgramState> {
+        // TODO: remove this borrow, and replace parse_parameter_value with self.get_param
         let prog = &mut self.program;
         loop {
             // The opcode is a two-digit number based only on the ones and tens digit of the value
@@ -219,10 +243,28 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     prog[a3] = if a1 == a2 { 1 } else { 0 };
                     self.instr_ptr += 4;
                 }
+                OpCode::RelativeBaseOffsetAdj => {
+                    let orig = self.relative_base;
+                    let adjustment = parse_parameter_value(prog, self.instr_ptr, 1);
+                    if adjustment < 0 {
+                        self.relative_base = self
+                            .relative_base
+                            .checked_sub(usize::try_from(-adjustment).unwrap())
+                            .unwrap();
+                    } else {
+                        self.relative_base =
+                            self.relative_base + usize::try_from(adjustment).unwrap();
+                    }
+                    self.instr_ptr += 2;
+                }
                 OpCode::Halt => break,
             }
         }
         Ok(ProgramState::Terminated(self.program[0]))
+    }
+
+    fn get_param(&self, param_offset: usize) -> MemContent {
+        parse_parameter_value(self.program, self.instr_ptr, param_offset)
     }
 }
 
