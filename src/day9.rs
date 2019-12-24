@@ -44,6 +44,15 @@ mod tests {
         }
         assert_eq!(&[3100786347], &exec.output[..]);
     }
+
+    #[test]
+    fn run_sensor_boost_mode() {
+        let mut prog = get_boost_program();
+        let mut exec = IntCodeProgramExecutor::from(&mut prog);
+        exec.mut_input().push(2);
+        exec.execute().unwrap();
+        assert_eq!(87023, exec.output[0]);
+    }
 }
 
 pub fn get_boost_program() -> Vec<MemContent> {

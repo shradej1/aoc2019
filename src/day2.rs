@@ -227,7 +227,6 @@ impl IntCodeProgramExecutor<&mut Vec<MemContent>> {
                     self.instr_ptr += 4;
                 }
                 OpCode::Input => {
-                    println!("{}", self.program[self.instr_ptr]);
                     let store_addr = self.get_write_index(1);
                     if self.input.is_empty() {
                         return Ok(ProgramState::AwaitingInput);
