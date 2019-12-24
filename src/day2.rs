@@ -134,6 +134,7 @@ impl From<Vec<MemContent>> for IntCodeProgramExecutor<Vec<MemContent>> {
 
 impl<'a> From<&'a mut Vec<MemContent>> for IntCodeProgramExecutor<&'a mut Vec<MemContent>> {
     fn from(program: &'a mut Vec<MemContent>) -> Self {
+        program.resize(program.len() * 10, MemContent::default());
         let noun = program[1];
         let verb = program[2];
         IntCodeProgramExecutor {
