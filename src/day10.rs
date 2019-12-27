@@ -5,6 +5,8 @@ use std::convert::TryFrom;
 /// Location of an asteroid.
 /// `x`: The distance from the left edge
 /// `y`: The distance from the top edge
+/// TODO: this should be a generic position, and AsteroidMap should define a `is_asteroid(pos) ->
+/// bool` fn
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct AsteroidLocation {
     x: usize,
@@ -42,6 +44,11 @@ impl Into<(i64, i64)> for AsteroidLocation {
 trait AsteroidMap {
     fn count_asteroids_visible_from(&self, pos: &AsteroidLocation) -> usize;
     fn clear_path_exists(&self, start: &AsteroidLocation, end: &AsteroidLocation) -> bool;
+    fn find_first(
+        &self,
+        origin: &AsteroidLocation,
+        direction: &AsteroidLocation,
+    ) -> Option<AsteroidLocation>;
 }
 
 impl AsteroidMap for BTreeSet<AsteroidLocation> {
@@ -56,32 +63,149 @@ impl AsteroidMap for BTreeSet<AsteroidLocation> {
     }
 
     fn clear_path_exists(&self, start: &AsteroidLocation, end: &AsteroidLocation) -> bool {
-        if start == end {
-            return true;
-        }
-        let start: (i64, i64) = start.clone().into();
-        let end: (i64, i64) = end.clone().into();
-
-        // compute slope and reduce
-        let slope = (end.0 - start.0, end.1 - start.1);
-        let slope = if slope.0 == 0 {
-            (0, slope.1.signum())
-        } else if slope.1 == 0 {
-            (slope.0.signum(), 0)
+        if let Some(first) = self.find_first(start, end) {
+            first == *end
         } else {
-            let gcd = slope.0.gcd(&slope.1);
-            (slope.0 / gcd, slope.1 / gcd)
-        };
-
-        let mut curr = (start.0 + slope.0, start.1 + slope.1);
-        while curr != end {
-            if self.contains(&AsteroidLocation::try_from(curr).unwrap()) {
-                return false;
-            }
-            curr = (curr.0 + slope.0, curr.1 + slope.1);
+            false
         }
-        true
     }
+
+    fn find_first(
+        &self,
+        origin: &AsteroidLocation,
+        direction: &AsteroidLocation,
+    ) -> Option<AsteroidLocation> {
+        if origin == direction {
+            Some(*origin)
+        } else {
+            let start: (i64, i64) = origin.clone().into();
+            let end: (i64, i64) = direction.clone().into();
+
+            // compute slope and reduce
+            let slope = (end.0 - start.0, end.1 - start.1);
+            let slope = if slope.0 == 0 {
+                (0, slope.1.signum())
+            } else if slope.1 == 0 {
+                (slope.0.signum(), 0)
+            } else {
+                let gcd = slope.0.gcd(&slope.1);
+                (slope.0 / gcd, slope.1 / gcd)
+            };
+
+            let mut curr = (start.0 + slope.0, start.1 + slope.1);
+            while curr != end {
+                let maybe_asteroid = AsteroidLocation::try_from(curr).unwrap();
+                if self.contains(&maybe_asteroid) {
+                    return Some(maybe_asteroid);
+                }
+                curr = (curr.0 + slope.0, curr.1 + slope.1);
+            }
+            if curr == end {
+                Some(AsteroidLocation::try_from(curr).unwrap())
+            } else {
+                None
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+struct NonNan(f64);
+
+impl NonNan {
+    /// Panics if val is NaN
+    fn new(val: f64) -> Self {
+        assert!(!val.is_nan());
+        NonNan(val)
+    }
+}
+
+impl Eq for NonNan {}
+
+impl Ord for NonNan {
+    fn cmp(&self, other: &NonNan) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+/// Returns the order in which the asteroids in the map will be vaporized, given the station
+/// location.
+/// The station location is not vaporized.
+fn plan_vaporization(
+    map: &BTreeSet<AsteroidLocation>,
+    station_loc: &AsteroidLocation,
+) -> Vec<AsteroidLocation> {
+    let mut map = map.clone();
+    map.remove(station_loc);
+    let mut order = Vec::new();
+
+    /// Computes the laser angle to the location
+    let laser_angle = |dir: &AsteroidLocation| -> NonNan {
+        NonNan::new(
+            (dir.x as f64 - station_loc.x as f64).atan2((dir.y as f64 - station_loc.y as f64)),
+        )
+    };
+
+    let mut curr_angle = NonNan(-std::f64::consts::FRAC_PI_2); // the current angle from vertical
+
+    while !map.is_empty() {
+        let maybe_asteroid = map
+            .iter()
+            .cloned()
+            .filter(|loc| laser_angle(loc) > curr_angle)
+            .max_by_key(|loc| laser_angle(loc));
+
+        dbg!(maybe_asteroid);
+        dbg!(map.len());
+        dbg!(order.len());
+        if let Some(asteroid) = maybe_asteroid {
+            let first = map.find_first(&station_loc, &asteroid).unwrap();
+            order.push(first);
+            map.remove(&first);
+            curr_angle = laser_angle(&asteroid);
+        } else {
+            // if we didn't find an asteroid, then the map is either empty, or we don't have any
+            // with a greater angle.  Set angle to less than -pi, the minimum value returned by atan2
+            curr_angle = NonNan::new(-std::f64::consts::PI - 1.0);
+        }
+
+        //if let Some(asteroid) =
+        //{
+        //    order.push(asteroid);
+        //    map.remove(&asteroid);
+        //}
+
+        // FIXME - this won't work.  circle around the station's location
+        // now advance clockwise
+        // deal with boundary conditions first
+        //if edge == (0, 0) {
+        //    // upper-right corner
+        //    edge = (1, 0);
+        //} else if edge == (width - 1, 0) {
+        //    // upper-right corner
+        //    edge = (width - 1, 1);
+        //} else if edge == (width - 1, height - 1) {
+        //    // bottom-right corner
+        //    edge = (width - 2, height - 1);
+        //} else if edge == (0, height - 1) {
+        //    // bottom-left corner
+        //    edge = (0, height - 2);
+        //} else if edge.0 == 0 {
+        //    // moving up left hand side
+        //    edge.1 -= 1;
+        //} else if edge.0 == width - 1 {
+        //    // moving down right hand side
+        //} else if edge.1 == 0 {
+        //    // moving across top
+        //    edge.0 += 1;
+        //} else if edge.1 == height - 1 {
+        //    // moving across bottom
+        //    edge.0 -= 1;
+        //} else {
+        //    dbg!(edge);
+        //}
+    }
+    order
 }
 
 fn string_to_asteroid_map(s: &str) -> BTreeSet<AsteroidLocation> {
@@ -234,5 +358,27 @@ mod tests {
             (AsteroidLocation::new(22, 28), 326),
             calculate_monitoring_station_position(&map)
         );
+    }
+
+    #[test]
+    fn test_vaporization_order_test() {
+        let map = string_to_asteroid_map(
+            ".#....#####...#..\n\
+             ##...##.#####..##\n\
+             ##...#...#.#####.\n\
+             ..#.....#...###..\n\
+             ..#.#.....#....##",
+        );
+        let station_loc = AsteroidLocation::new(8, 3);
+        let vaporization_order = plan_vaporization(&map, &station_loc);
+        assert_eq!(vaporization_order.len(), map.len() - 1);
+    }
+
+    #[test]
+    fn test_vaporization_order() {
+        let map = string_to_asteroid_map(get_asteroid_map());
+        let (station, _) = calculate_monitoring_station_position(&map);
+        let vaporization_order = plan_vaporization(&map, &station);
+        assert_eq!(vaporization_order.len(), map.len() - 1);
     }
 }
