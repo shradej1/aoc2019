@@ -128,6 +128,15 @@ impl Ord for NonNan {
     }
 }
 
+/// This is defined so that straight up is PI radians, rotating clockwise to PI/2 to the right, 0
+/// straight down, -PI/2 to the left, and approaching -PI coming back around to vertical.
+fn compute_laser_angle(station_loc: &AsteroidLocation, asteroid_loc: &AsteroidLocation) -> NonNan {
+    NonNan::new(
+        (asteroid_loc.x as f64 - station_loc.x as f64)
+            .atan2(asteroid_loc.y as f64 - station_loc.y as f64),
+    )
+}
+
 /// Returns the order in which the asteroids in the map will be vaporized, given the station
 /// location.
 /// The station location is not vaporized.
@@ -139,25 +148,19 @@ fn plan_vaporization(
     map.remove(station_loc);
     let mut order = Vec::new();
 
-    /// Computes the laser angle to the location
-    let laser_angle = |dir: &AsteroidLocation| -> NonNan {
-        NonNan::new(
-            (dir.x as f64 - station_loc.x as f64).atan2((dir.y as f64 - station_loc.y as f64)),
-        )
-    };
+    // Computes the laser angle to the location
+    let laser_angle = |dir: &AsteroidLocation| -> NonNan { compute_laser_angle(station_loc, dir) };
 
-    let mut curr_angle = NonNan(-std::f64::consts::FRAC_PI_2); // the current angle from vertical
+    let max_ang = NonNan(std::f64::consts::PI * 2.0); // the current angle from vertical
+    let mut curr_angle = max_ang;
 
     while !map.is_empty() {
         let maybe_asteroid = map
             .iter()
             .cloned()
-            .filter(|loc| laser_angle(loc) > curr_angle)
+            .filter(|loc| laser_angle(loc) < curr_angle)
             .max_by_key(|loc| laser_angle(loc));
 
-        dbg!(maybe_asteroid);
-        dbg!(map.len());
-        dbg!(order.len());
         if let Some(asteroid) = maybe_asteroid {
             let first = map.find_first(&station_loc, &asteroid).unwrap();
             order.push(first);
@@ -166,44 +169,8 @@ fn plan_vaporization(
         } else {
             // if we didn't find an asteroid, then the map is either empty, or we don't have any
             // with a greater angle.  Set angle to less than -pi, the minimum value returned by atan2
-            curr_angle = NonNan::new(-std::f64::consts::PI - 1.0);
+            curr_angle = max_ang;
         }
-
-        //if let Some(asteroid) =
-        //{
-        //    order.push(asteroid);
-        //    map.remove(&asteroid);
-        //}
-
-        // FIXME - this won't work.  circle around the station's location
-        // now advance clockwise
-        // deal with boundary conditions first
-        //if edge == (0, 0) {
-        //    // upper-right corner
-        //    edge = (1, 0);
-        //} else if edge == (width - 1, 0) {
-        //    // upper-right corner
-        //    edge = (width - 1, 1);
-        //} else if edge == (width - 1, height - 1) {
-        //    // bottom-right corner
-        //    edge = (width - 2, height - 1);
-        //} else if edge == (0, height - 1) {
-        //    // bottom-left corner
-        //    edge = (0, height - 2);
-        //} else if edge.0 == 0 {
-        //    // moving up left hand side
-        //    edge.1 -= 1;
-        //} else if edge.0 == width - 1 {
-        //    // moving down right hand side
-        //} else if edge.1 == 0 {
-        //    // moving across top
-        //    edge.0 += 1;
-        //} else if edge.1 == height - 1 {
-        //    // moving across bottom
-        //    edge.0 -= 1;
-        //} else {
-        //    dbg!(edge);
-        //}
     }
     order
 }
@@ -372,13 +339,20 @@ mod tests {
         let station_loc = AsteroidLocation::new(8, 3);
         let vaporization_order = plan_vaporization(&map, &station_loc);
         assert_eq!(vaporization_order.len(), map.len() - 1);
+        assert_eq!(vaporization_order[0], AsteroidLocation::new(8, 1));
+        assert_eq!(vaporization_order[1], AsteroidLocation::new(9, 0));
+        assert_eq!(vaporization_order[2], AsteroidLocation::new(9, 1));
+        assert_eq!(vaporization_order[3], AsteroidLocation::new(10, 0));
     }
 
     #[test]
-    fn test_vaporization_order() {
+    fn test_vaporization_order_answer() {
         let map = string_to_asteroid_map(get_asteroid_map());
         let (station, _) = calculate_monitoring_station_position(&map);
         let vaporization_order = plan_vaporization(&map, &station);
         assert_eq!(vaporization_order.len(), map.len() - 1);
+        let vap_200 = vaporization_order[199];
+        let ans = vap_200.x * 100 + vap_200.y;
+        assert_eq!(1623, ans);
     }
 }
