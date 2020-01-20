@@ -1,5 +1,6 @@
 use crate::day2::{IntCodeProgram, IntCodeProgramExecutor, MemContent, ProgramState};
 use std::collections::BTreeMap;
+use std::fmt;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Color {
@@ -95,6 +96,31 @@ impl Hull {
     }
 }
 
+impl fmt::Display for Hull {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let min_x = self.tiles.keys().map(|p| p.0).min().unwrap();
+        let max_x = self.tiles.keys().map(|p| p.0).max().unwrap();
+        let min_y = self.tiles.keys().map(|p| p.1).min().unwrap();
+        let max_y = self.tiles.keys().map(|p| p.1).max().unwrap();
+
+        for y in (min_y..=max_y).rev() {
+            for x in min_x..=max_x {
+                write!(
+                    f,
+                    "{}",
+                    if self.color(&(x, y)) == Color::Black {
+                        "."
+                    } else {
+                        "#"
+                    }
+                )?;
+            }
+            write!(f, "\n")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Robot {
     orientation: Orientation,
@@ -126,9 +152,8 @@ impl Robot {
     }
 }
 
-fn execute() -> usize {
+fn paint(hull: &mut Hull) {
     let mut robot = Robot::new();
-    let mut hull = Hull::new();
 
     let mut prog = get_program();
     let mut exec = IntCodeProgramExecutor::from(&mut prog);
@@ -150,8 +175,6 @@ fn execute() -> usize {
     }
 
     state.expect("IntCode Program terminated abnormally");
-
-    hull.painted_count()
 }
 
 #[cfg(test)]
@@ -226,6 +249,13 @@ mod tests {
         assert_eq!(hull.color(&(0, -1)), Color::White);
         assert_eq!(hull.color(&(1, 0)), Color::White);
         assert_eq!(hull.color(&(1, 1)), Color::White);
+
+        assert_eq!(
+            "..#\n\
+             ..#\n\
+             ##.\n",
+            format!("{}", hull)
+        );
     }
 
     #[test]
@@ -239,7 +269,25 @@ mod tests {
 
     #[test]
     fn test_execute() {
-        assert_eq!(2172, execute());
+        let mut hull = Hull::new();
+        paint(&mut hull);
+        assert_eq!(2172, hull.painted_count());
+    }
+
+    #[test]
+    fn test_execute_on_white_part_2() {
+        let mut hull = Hull::new();
+        hull.paint((0, 0), Color::White);
+        paint(&mut hull);
+
+        let expected = "...##.####.#....####.####..##..#..#.###....\n\
+                        ....#.#....#....#....#....#..#.#..#.#..#...\n\
+                        ....#.###..#....###..###..#....####.#..#...\n\
+                        ....#.#....#....#....#....#.##.#..#.###....\n\
+                        .#..#.#....#....#....#....#..#.#..#.#......\n\
+                        ..##..####.####.####.#.....###.#..#.#......\n";
+
+        assert_eq!(expected, format!("{}", hull));
     }
 }
 
